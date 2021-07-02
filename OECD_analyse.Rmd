@@ -1,0 +1,974 @@
+---
+title: "OECD analysis"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Assigment to replace the midterm exam"
+    toc: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+
+
+rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
+gc() 
+
+
+library(lubridate)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(caret)
+library(rlang)
+library(dplyr)
+library(httr)
+library(pROC)
+library(rpart)
+library(rpart.plot)
+
+
+##=========================================================================================
+##                  Function to import from csv files
+##=========================================================================================
+import <- function ( file_path_, skip_value_ )
+{
+  files_names_  = list.files( path = file_path_, 
+                              recursive = FALSE, 
+                              pattern = '*.csv' )
+  
+  full_path_ = file.path ( file_path_ , files_names_ ) 
+  
+  data_file_ = full_path_	%>%
+               map( read_csv  )  %>% 
+               reduce( rbind ) 
+  
+  return ( data_file_ )
+}
+##=========================================================================================
+
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import_single_cvs <- function ( file_path_, file_name_  ){
+  
+  full_path_ <- file.path ( file_path_ , file_name_ ) 
+  file_ = read.csv(full_path_)
+  print(full_path_)
+  return( file_ )
+}
+##=========================================================================================
+
+
+##=========================================================================================
+##  Function to count the elements by columns
+##=========================================================================================
+count_element_split <- function(values_){
+  c_col_values_ <- unique(tibble(cols = unlist ( str_split( values_ , "([\\|])", 10))))
+  c_col_values_$cols <- ifelse(c_col_values_$cols=="", NA,c_col_values_$cols)
+  c_col_values_ <- c_col_values_ %>%  na.omit() 
+  return ( nrow(c_col_values_) )
+}
+##=========================================================================================
+
+##=========================================================================================
+##  Function to get the mode of a given column
+##=========================================================================================
+ getMode <- function(cols_values, criteria_ ) {
+   
+   values_ <- cols_values
+   if (!is.na(criteria_)) values_ <- filter(cols_values,y==criteria_) %>% select(x) %>% na.omit()
+   
+   keys <- na.omit(unique(values_$x)) 
+   mode_ <- keys[which.max(tabulate(match(values_, keys)))]
+   
+   return(mode_)
+   
+ }
+```
+
+# 1 OECD - Intergovernmental Economic Organisation
+
+## 1.1 Upload data from OECD website
+
+OECD website allows people to download cvs files based on the existing initiatives per country. So, I donwloaded each file corresponding to every country and saved them into the data folder in the R environment to be later processed creating an only one data structure. I created an _import function_ that helps to combine all data within the files into a unique dataset called _data.set.imported_
+
+**Note: _Some warnings were raised during the import of the csv files_**\
+      See spec(...) for full column specifications.\
+      Parsed with column specification:\
+      cols(\
+      .default = col_character(),\
+      `Original name(s)` = col_logical(),\
+      `Acronym` = col_logical(),\
+      `Start date` = col_double(),\
+      `End date` = col_logical(),\
+      `(in local currency)` = col_logical(),\
+      `Background` = col_logical(),\
+      `Public access URL` = col_logical(),\
+      `Is evaluated ?` = col_logical(),\
+      `Evaluation URL` = col_logical(),\
+      `Policy instrument name` = col_logical(),\
+      `Policy instrument description(s)` = col_logical(),\
+      `Policy instrument note(s)` = col_logical()\
+      )\
+      
+```{r upload , echo=FALSE}
+
+    ## Import for CSV previously downloaded from the OECD website
+    INPUT_DATA_FILE_PATH  <- "data"
+    data.file.imported_   <- import ( INPUT_DATA_FILE_PATH, 15 )
+    
+    ## Create a copy of the original dataset
+    data.copy_ <- data.file.imported_
+    
+    
+    ## Display the first three (5) rows (without any operation)
+    some.rows_  <- head(data.file.imported_, 3)
+     
+    nbr.of.observation_ <- data.file.imported_ %>% summarize ( count = n() ) 
+    
+    column.data.type_ <- data.file.imported_ %>% map(typeof)
+    
+```
+## 1.2 Some statistics regarding the dataset created after the import
+
+* _Observations_ :
+```{r echo = FALSE}
+   nbr.of.observation_
+```
+
+* _Following the three (3) first rows of the dataset without any Exploration Data Analysis (EDA):_ 
+```{r echo = FALSE}
+   some.rows_
+```
+
+* _Daset columns_ :
+
+I have noticed that after the import that the following columns were loaded as:\
+ _Start date_     : double \
+ _End date_       : double \
+ _Evaluation URL_ : logical\
+ _Policy instrument note(s)_ : logical\
+
+I think these columns must be switched to a different data type during the EDA.
+```{r echo = FALSE}
+   column.data.type_
+```
+
+# 2 Exploratory Data Analysis - EDA
+
+## 2.1 Data analysis and manipulation
+
+```{r EDA1, echo = FALSE}
+    col.1 <- data.file.imported_[1][1,1]
+    data.file.imported_ <- data.file.imported_ %>% separate(`Policy initiative ID`,into = c('toremove','Policy initiative ID'), sep="/data/policyInitiatives/")
+    data.file.imported_ <- data.file.imported_ %>% select(-toremove)
+    col.1.1 <- data.file.imported_[1][1,1]
+    
+    col.2 <- data.file.imported_[2][1,1]
+    col.2.na <- data.file.imported_ %>% filter(is.na(`English name`)) %>% summarize (count = n())
+    
+    col.3 <- data.file.imported_[3][1,1]
+    col.3.na <- data.file.imported_ %>% filter(is.na(`Original name(s)`)) %>% summarize (count = n())
+   
+    col.4 <- data.file.imported_[4][1,1]
+    col.4.na <- data.file.imported_ %>% filter(is.na(`Acronym`)) %>% summarize (count = n())
+    
+    col.5 <- data.file.imported_[5][1,1]
+    col.5.na <- data.file.imported_ %>% filter(is.na(`Description`)) %>% summarize (count = n())
+    
+    col.6 <- data.file.imported_[6][1,1]
+    col.6.na <- data.file.imported_ %>% filter(is.na(`Start date`)) %>% summarize (count = n())
+    
+```
+
+After analysing the dataset, I reached the conclusion that the following columns should pay a particular attention regarding the NA values and format:\
+As example, I will show an observation for each column in the dataset. \
+
+* `_Policy initiative ID`_: `r col.1`. I decided to remove the "http://stip.oecd.org/2019/data/policyInitiatives/" string from the observations and leave the numeric value only since the link(s) produce(s) an error once we tried to open it.\ The _Policy initiative ID_ after the transformation: `r col.1.1` \
+
+* `_English name`_: `r col.2`. and **number of NA's values : `r col.2.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* `_Original name(s)`_: `r col.3`. and **number of NA's values : `r col.3.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* `_Acronym`_: `r col.4`. and **number of NA's values : `r col.4.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* `_Description`_:`r col.5`. and **number of NA's values : `r col.5.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* `_Start Date`_:`r col.6`. and **number of NA's values : `r col.6.na`**. The following is the list of NA's values:
+
+```{r echo = FALSE}
+    
+    set.col6.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Start date`,  Country ) %>% filter(is.na(`Start date`))
+    set.col6.na_
+    
+    #Used as parm for the getMode function
+    set_ <- data.file.imported_ %>% select(`Start date`,Country ) %>% filter(!is.na(`Start date`)) %>% distinct()
+    set.mode_ <- tibble (x= set_$`Start date`, y=set_$Country)
+    set.col6.na_ <- set.col6.na_ %>% select( Country ) %>% distinct()
+
+```
+
+My approach to solve this issue of NA's values for the Start_Date column is to run a search by country and assign the _MODE_ of start_date to the corresponding NA value of the countries in list shown above. In the case, there is not more observations regarding to a country in the list, I would assign the _MODE_ of the entire population to the NA value of that country/observation.
+
+```{r echo=FALSE} 
+
+for(i in 1:nrow(set.col6.na_)){
+  
+  found_ <- data.file.imported_ %>% select(`Start date`,  Country) %>% filter(Country == set.col6.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col6.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+                          mutate(`Start date` = if_else(is.na(`Start date`) & Country == set.col6.na_$Country[i], mode_, `Start date`))
+  
+}
+
+set.col6.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Start date`,  Country ) %>% filter(is.na(`Start date`))
+set.col6.na_
+col.6.na <- data.file.imported_ %>% filter(is.na(`Start date`)) %>% summarize (count = n())
+
+ col.7 <- data.file.imported_[7][1,1]
+ col.7.na <- data.file.imported_ %>% filter(is.na(`End date`)) %>% summarize (count = n())
+ 
+ col.8 <- data.file.imported_ [8][1,1]
+ col.8.na <- data.file.imported_ %>% filter(is.na(`Budget amount\r(in local currency)`)) %>% summarize (count = n())
+ 
+ col.9 <- data.file.imported_ [9][1,1]
+ col.9.na <- data.file.imported_ %>% filter(is.na(Background)) %>% summarize (count = n())
+ 
+ col.10 <- data.file.imported_ [10][1,1]
+ col.10.na <- data.file.imported_ %>% filter(is.na(`Objective(s)`)) %>% summarize (count = n())
+ 
+ col.11 <- data.file.imported_ [11][1,1]
+ col.11.na <- data.file.imported_ %>% filter(is.na(`Responsible organisation(s)`)) %>% summarize (count = n())
+ 
+ col.12 <- data.file.imported_ [12][1,1]
+ col.12.na <- data.file.imported_ %>% filter(is.na(`Public access URL`)) %>% summarize (count = n())
+ 
+ col.13 <- data.file.imported_ [13][1,1]
+ col.13.na <- data.file.imported_ %>% filter(is.na(`Is evaluated ?`)) %>% summarize (count = n())
+ 
+ col.14 <- data.file.imported_ [14][1,1]
+ col.14.na <- data.file.imported_ %>% filter(is.na(`Evaluation URL`)) %>% summarize (count = n())
+ 
+ col.15 <- data.file.imported_ [15][1,1]
+ col.15.na <- data.file.imported_ %>% filter(is.na(`Yearly budget range`)) %>% summarize (count = n())
+ 
+ col.16 <- data.file.imported_ [16][1,1]
+ col.16.na <- data.file.imported_ %>% filter(is.na(Country)) %>% summarize (count = n())
+ 
+ col.17 <- data.file.imported_ [17][1,1]
+ col.17.na <- data.file.imported_ %>% filter(is.na(`Theme area(s)`)) %>% summarize (count = n())
+ 
+ col.18 <- data.file.imported_ [18][1,1]
+ col.18.na <- data.file.imported_ %>% filter(is.na(`Theme(s)`)) %>% summarize (count = n())
+ 
+ col.19 <- data.file.imported_ [19][1,1]
+ col.19.na <- data.file.imported_ %>% filter(is.na(`Target group type(s)`)) %>% summarize (count = n())
+
+``` 
+   
+* _`Start date`_:`r col.6`. and **number of NA's values : `r col.6.na`**. After applying a rule to avoid NA's values
+
+* _`End date`_:`r col.7`. and **number of NA's values : `r col.7.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Budget amount\r(in local currency)`_:`r col.8`. and **number of NA's values : `r col.8.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.     
+
+* _`Background`_:`r col.9`. and **number of NA's values : `r col.9.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.         
+* _`Objective(s)`_:`r col.10`. and **number of NA's values : `r col.10.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.     
+* _`Responsible organisation(s)`_:`r col.11`. and **number of NA's values : `r col.11.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* _`Public access URL`_:`r col.12`. and **number of NA's values : `r col.12.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* _`Is evaluated ?`_:`r col.13`. and **number of NA's values : `r col.13.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* _`Evaluation URL`_:`r col.14`. and **number of NA's values : `r col.14.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import. 
+
+* _`Yearly budget range`_:`r col.15`. and **number of NA's values : `r col.15.na`**.List of NA's for the column Yearly budget range:
+
+```{r echo = FALSE}
+    
+    set.col15.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Yearly budget range`,  Country ) %>% filter(is.na(`Yearly budget range`))
+    set.col15.na_
+    
+    #Used as parm for the getMode function
+    set_ <- data.file.imported_ %>% select(`Yearly budget range`, Country ) %>% filter(!is.na(`Yearly budget range`)) %>% distinct()
+    set.mode_ <- tibble (x= set_$`Yearly budget range`, y=set_$Country)
+    set.col15.na_ <- set.col15.na_ %>% select( Country ) %>% distinct()
+
+``` 
+
+I will apply the same principle as I did before for start_date to fix the NA's value for the _Target Group Type(s), Target group(s), Policy instrument type category and Policy instrument type_. I will apply or assign the _MODE_. 
+
+
+```{r EDA, echo = FALSE}  
+
+ for(i in 1:nrow(set.col15.na_)){
+  
+  found_ <- data.file.imported_ %>% 
+            select(`Yearly budget range`,Country) %>% 
+            filter(Country == set.col15.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col15.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+      mutate(`Yearly budget range` = if_else(is.na(`Yearly budget range`) & Country == set.col15.na_$Country[i], mode_, `Yearly budget range`))
+  
+}
+
+set.col15.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Yearly budget range`,  Country ) %>% filter(is.na(`Yearly budget range`))
+set.col15.na_
+
+```
+
+* _`Country`_:`r col.16`. and **number of NA's values : `r col.16.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Theme area(s)`_:`r col.17`. and **number of NA's values : `r col.17.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Theme(s)`_:`r col.18`. and **number of NA's values : `r col.18.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Target group type(s)`_:`r col.19`. and **number of NA's values : `r col.19.na`**. List of NA's for the column Target Group type(s):
+
+```{r echo = FALSE}
+    
+    set.col19.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Target group type(s)`,  Country ) %>% filter(is.na(`Target group type(s)`))
+    set.col19.na_
+    
+    #Used as parm for the getMode function
+    set_ <- data.file.imported_ %>% select(`Target group type(s)`, Country ) %>% filter(!is.na(`Target group type(s)`)) %>% distinct()
+    set.mode_ <- tibble (x= set_$`Target group type(s)`, y=set_$Country)
+    set.col19.na_ <- set.col19.na_ %>% select( Country ) %>% distinct()
+
+``` 
+I will apply the same principle as I did before for start_date to fix the NA's value for the _Target Group Type(s), Target group(s), Policy instrument type category and Policy instrument type_. I will apply or assign the _MODE_. 
+
+
+```{r EDA3, echo = FALSE}  
+
+ for(i in 1:nrow(set.col19.na_)){
+  
+  found_ <- data.file.imported_ %>% 
+            select(`Target group type(s)`,Country) %>% 
+            filter(Country == set.col19.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col19.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+      mutate(`Target group type(s)` = if_else(is.na(`Target group type(s)`) & Country == set.col19.na_$Country[i], mode_, `Target group type(s)`))
+  
+}
+
+set.col19.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Target group type(s)`,  Country ) %>% filter(is.na(`Target group type(s)`))
+set.col19.na_
+
+col.20 <- data.file.imported_ [20][1,1]
+col.20.na <- data.file.imported_ %>% filter(is.na(`Target group(s)`)) %>% summarize (count = n())
+```
+
+* _`Target group(s)`_:`r col.20`. and **number of NA's values : `r col.20.na`**. 
+
+List of NA's for the column Target Group(s):
+```{r echo = FALSE}
+    
+ set.col20.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Target group(s)`,  Country ) %>% filter(is.na(`Target group(s)`))
+ set.col20.na_
+    
+ #Used as parm for the getMode function
+ set_ <- data.file.imported_ %>% select(`Target group(s)`, Country ) %>% filter(!is.na(`Target group(s)`)) %>% distinct()
+ set.mode_ <- tibble (x= set_$`Target group(s)`, y=set_$Country)
+ set.col20.na_ <- set.col20.na_ %>% select( Country ) %>% distinct()
+
+```
+
+After applying the _Mode_ to the NA's in the Target group(s)
+
+```{r EDA4, echo = FALSE}  
+
+for(i in 1:nrow(set.col20.na_)){
+  
+  found_ <- data.file.imported_ %>% 
+            select(`Target group(s)`,Country) %>% 
+            filter(Country == set.col20.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col20.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+      mutate(`Target group(s)` = if_else(is.na(`Target group(s)`) & Country == set.col20.na_$Country[i], mode_, `Target group(s)`))
+  
+}
+
+set.col20.na_ <- data.file.imported_ %>% select(`Policy initiative ID`,`Target group(s)`,  Country ) %>% filter(is.na(`Target group(s)`))
+set.col20.na_
+
+ col.21 <- data.file.imported_ [21][1,1]
+ col.21.na <- data.file.imported_ %>% filter(is.na(`Policy instrument ID`)) %>% summarize (count = n())
+
+ data.file.imported_ <- data.file.imported_ %>% separate(`Policy instrument ID`,into = c('toremove','Policy instrument ID'), sep="/instrument/")
+ data.file.imported_ <- data.file.imported_ %>% select(-toremove)
+ col.21.1 <- data.file.imported_[21][1,1]
+    
+ col.22 <- data.file.imported_ [22][1,1]
+ col.22.na <- data.file.imported_ %>% filter(is.na(`Policy instrument type category`)) %>% summarize (count = n())
+ 
+ col.23 <- data.file.imported_ [23][1,1]
+ col.23.na <- data.file.imported_ %>% filter(is.na(`Policy instrument type`)) %>% summarize (count = n())
+ 
+ col.24 <- data.file.imported_ [24][1,1]
+ col.24.na <- data.file.imported_ %>% filter(is.na(`Policy instrument name`)) %>% summarize (count = n())
+ 
+ col.25 <- data.file.imported_ [25][1,1]
+ col.25.na <- data.file.imported_ %>% filter(is.na(`Policy instrument description(s)`)) %>% summarize (count = n())
+ 
+ col.26 <- data.file.imported_ [26][1,1]
+ col.26.na <- data.file.imported_ %>% filter(is.na(`Policy instrument note(s)`)) %>% summarize (count = n())
+ 
+ col.27 <- data.file.imported_ [27][1,1]
+ col.27.na <- data.file.imported_ %>% filter(is.na(`Policy instrument mini-field(s)`)) %>% summarize (count = n())
+ 
+```  
+
+
+* _`Policy instrument ID`_:`r col.21`. and **number of NA's values : `r col.21.na`**. I decided to remove the "http://stip.oecd.org/2019/data/policyInitiatives/15065/instrument/" string from the observations and leave the numeric value only since the link(s) produce(s) an error once we tried to open it.\ The _Policy instrument ID_ after the transformation: `r col.21.1` \
+
+* _`Policy instrument type category`_:`r col.22`. and **number of NA's values : `r col.22.na`**.List of NA's for the column Policy instrument type category:
+```{r echo = FALSE}
+    
+ set.col22.na_ <- data.file.imported_ %>% 
+      select(`Policy initiative ID`,`Policy instrument type category`,  Country ) %>% filter(is.na(`Policy instrument type category`))
+ 
+set.col22.na_
+    
+ #Used as parm for the getMode function
+ set_ <- data.file.imported_ %>% select(`Policy instrument type category`, Country ) %>% filter(!is.na(`Policy instrument type category`)) %>% distinct()
+ set.mode_ <- tibble (x= set_$`Policy instrument type category`, y=set_$Country)
+ set.col22.na_ <- set.col22.na_ %>% select( Country ) %>% distinct()
+
+```
+
+After applying the _Mode_ to the NA's in the Policy instrument type category
+
+```{r EDA5, echo = FALSE}  
+
+for(i in 1:nrow(set.col22.na_)){
+  
+  found_ <- data.file.imported_ %>% 
+            select(`Policy instrument type category`,Country) %>% 
+            filter(Country == set.col22.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col22.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+  mutate(`Policy instrument type category` = if_else(is.na(`Policy instrument type category`) & Country == set.col22.na_$Country[i], mode_, `Policy instrument type category`))
+  
+}
+
+set.col22.na_ <- data.file.imported_ %>% 
+  select(`Policy initiative ID`,`Policy instrument type category`,  Country ) %>% filter(is.na(`Policy instrument type category`))
+
+set.col22.na_
+```
+
+* _`Policy instrument type`_:`r col.23`. and **number of NA's values : `r col.23.na`**. List of NA's for the column Policy instrument type :
+```{r echo = FALSE}
+    
+ set.col23.na_ <- data.file.imported_ %>% 
+      select(`Policy initiative ID`,`Policy instrument type`,  Country ) %>% filter(is.na(`Policy instrument type`))
+ 
+ set.col23.na_
+    
+ #Used as parm for the getMode function
+ set_ <- data.file.imported_ %>% select(`Policy instrument type`, Country ) %>% filter(!is.na(`Policy instrument type`)) %>% distinct()
+ set.mode_ <- tibble (x= set_$`Policy instrument type`, y=set_$Country)
+ set.col23.na_ <- set.col23.na_ %>% select( Country ) %>% distinct()
+
+```
+
+
+After applying the _Mode_ to the NA's in the Policy instrument type:
+
+```{r EDA6, echo = FALSE}  
+
+for(i in 1:nrow(set.col23.na_)){
+  
+  found_ <- data.file.imported_ %>% 
+            select(`Policy instrument type`,Country) %>% 
+            filter(Country == set.col23.na_$Country[i]) %>% na.omit() %>% distinct() %>% nrow()
+  
+  if (found_ == 0)  mode_ <- getMode(set.mode_, NA)
+  if (found_ > 0 )  mode_ <- getMode(set.mode_, set.col23.na_$Country[i])
+ 
+  data.file.imported_ <- data.file.imported_ %>%
+  mutate(`Policy instrument type` = if_else(is.na(`Policy instrument type`) & Country == set.col23.na_$Country[i], mode_, `Policy instrument type`))
+  
+}
+
+set.col23.na_ <- data.file.imported_ %>% 
+  select(`Policy initiative ID`,`Policy instrument type`,  Country ) %>% filter(is.na(`Policy instrument type`))
+
+set.col23.na_
+```
+* _`Policy instrument name`_:`r col.24`. and **number of NA's values : `r col.24.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Policy instrument description(s)`_:`r col.25`. and **number of NA's values : `r col.25.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Policy instrument note(s)`_:`r col.26`. and **number of NA's values : `r col.26.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+* _`Policy instrument mini-field(s)`_:`r col.27`. and **number of NA's values : `r col.27.na`**. I decided not to apply any action on this column - I keep the observations as they are from the import.
+
+
+## 2.2 Data set transformations
+
+I decided to create a new dataset having some data transformations done and the columns renamed in order to facilitate the data manipulation.
+```{r echo=FALSE}
+   new.set_ <- data.file.imported_
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Policy initiative ID`), ~'v1')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`English name`), ~'v2')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Description`), ~'v3')
+
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Start date`), ~'v4')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`End date`), ~'v5')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Budget amount\r(in local currency)`), ~'v6')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(Background), ~'v7')
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Objective(s)`), ~'v8')
+
+new.set_<- add_column(new.set_, v9= 0:0, .after = 'v8')
+
+for (i in 1:nrow(new.set_)){
+    values_ <- new.set_$`Responsible organisation(s)`[i]
+    if (!is.na(values_)) new.set_['v9'][i,1] <- count_element_split(values_)
+}
+
+new.set_ <- new.set_ %>% select(-`Responsible organisation(s)`)
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Is evaluated ?`), ~'v10')
+
+new.set_ <- new.set_ %>%
+                       mutate(v10 = ifelse(v10 == FALSE,0,1)) %>%
+                       mutate(v10 = as.integer(v10))
+
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Yearly budget range`), ~'v11')
+
+
+new.set_ <- new.set_ %>%
+  rename_at(vars(Country), ~'v12')
+
+new.set_<- add_column(new.set_, v13 = 0:0, .after = 'v12')
+
+
+col_countries <- distinct ( new.set_ , new.set_$v12 ) 
+t_ <-tibble( id = c(1:nrow(col_countries)) , name = col_countries)
+
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$v12[i]
+  new.set_['v13'][i,1] <- t_ %>% filter(name == values_) %>% select (id)
+}
+
+na_ <- new.set_ %>%  filter(is.na(`Theme area(s)`)) %>% nrow()
+new.set_<- add_column(new.set_, v14 = 0:0, .after = 'v13')
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Theme area(s)`[i]
+  new.set_['v14'][i,1] <- count_element_split(values_)
+}
+
+
+na_ <- new.set_ %>% filter(is.na(`Theme(s)`)) %>% nrow()
+new.set_<- add_column(new.set_, v15 = 0:0, .after = 'v14')
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Theme(s)`[i]
+  new.set_['v15'][i,1] <- count_element_split(values_)
+}
+
+
+#'ojo hay NA'
+na_ <- new.set_ %>%  filter(is.na(`Target group type(s)`)) %>%  nrow()
+new.set_<- add_column(new.set_, v16 = 0:0, .after = 'v15')
+
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Target group type(s)`[i]
+  if (!is.na( values_ ))
+    new.set_['v16'][i,1] <- count_element_split(values_)
+}
+
+#Get the numeric value from the Policy instrument ID
+new.set_ <- new.set_ %>%
+                       rename_at(vars(`Policy instrument ID`), ~'v17')
+
+#'ojo hay NA'
+na_ <- new.set_ %>%  filter(is.na(`Target group(s)`)) %>% nrow()
+new.set_<- add_column(new.set_, v18 = 0:0, .after = 'v17')
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Target group(s)`[i]
+  if (!is.na( values_ ))
+    new.set_['v18'][i,1] <- count_element_split(values_)
+}
+
+
+na_ <- new.set_ %>%  filter(is.na(`Policy instrument type category`)) %>% nrow()
+new.set_<- add_column(new.set_, v19 = 0:0, .after = 'v18')
+
+col_policy_inst_ty_cat_ <- distinct ( new.set_ , new.set_$`Policy instrument type category` ) 
+t_ <- tibble( id = c(1:nrow(col_policy_inst_ty_cat_)) , name = col_policy_inst_ty_cat_)
+t_ <- t_ %>% filter( !is.na(name)) %>% na.omit()
+
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Policy instrument type category`[i]
+  if (!is.na( values_ )) new.set_['v19'][i,1] <- t_ %>% filter(name == values_) %>% select (id)
+}
+
+na_ <- new.set_ %>%  filter(is.na(`Policy instrument type`)) %>% nrow()
+new.set_['v20'] <- 0
+col_policy_inst_ty_ <- distinct ( new.set_ , new.set_$`Policy instrument type` ) 
+t_ <- tibble( id = c(1:nrow(col_policy_inst_ty_)) , name = col_policy_inst_ty_)
+t_ <- t_ %>% filter( !is.na(name)) %>% na.omit()
+for (i in 1:nrow(new.set_)){
+  values_ <- new.set_$`Policy instrument type`[i]
+  if (!is.na( values_ )) new.set_['v20'][i,1] <- t_ %>% filter(name == values_) %>% select (id)
+}
+
+
+##========================================================================
+## Switch the column data type
+##========================================================================
+new.set_ <- new.set_ %>% mutate(v4 = as.integer(v4))
+new.set_ <- new.set_ %>% mutate(v5 = as.integer(v5))
+#new.set_ <- new.set_ %>% mutate(v11 = as.integer(v11))
+
+
+##========================================================================
+## Remove columns
+##========================================================================
+#new.set_$Country <- NULL
+new.set_$`Policy instrument type` <- NULL
+new.set_$`Policy instrument note(s)` <- NULL
+new.set_$`Policy instrument mini-field(s)` <- NULL
+new.set_$`Policy instrument description(s)` <- NULL
+new.set_$`Policy instrument name` <- NULL
+new.set_$`Original name(s)` <- NULL
+new.set_$`Acronym` <- NULL
+new.set_$`Public access URL` <- NULL
+new.set_$`Evaluation URL` <- NULL
+
+new.set_$`Theme area(s)` <- NULL
+new.set_$`Theme(s)` <- NULL
+new.set_$`Target group type(s)` <- NULL
+new.set_$`Target group(s)` <- NULL
+new.set_$`Policy instrument type category` <- NULL
+##new.set_$`Policy instrument ID` <- NULL
+##========================================================================
+new.set_ %>% map(typeof)
+## Display the first three (5) rows (without any operation)
+some.rows_  <- head(new.set_,10)
+write.csv(new.set_, 'data/dataSet_Model_1.csv' )
+
+```
+
+**Note: _Mapping of the data conversion_**\
+`Policy initiative ID` ~'v1' \
+`English name` ~'v2' \
+`Description`  ~'v3'\
+`Start date`   ~'v4'\
+`End date`     ~'v5'\
+`Budget amount\r(in local currency)` ~'v6'\
+`Background` ~'v7'\
+`Objective(s)` ~'v8'\
+`Responsible organisation(s)` ~'v9'- count of\
+`Is evaluated ?` ~'v10'\
+`Yearly budget range` ~'v11'\
+`Country`         ~'v12'\
+`Country - dummy` ~'v13'\
+`Theme area(s)`   ~'v14' - count of\
+`Theme(s)`        ~'v15' - count of\
+`Target group type(s)` ~'v16' - count of\
+`Policy instrument ID` ~'v17'\
+`Target group(s)` ~'v18' - count of\
+`Policy instrument type category` ~'v19'\
+`Policy instrument type`  ~'v20'\
+
+* _Following the ten (10) first rows of the dataset after any Exploration Data Analysis (EDA):_ 
+```{r echo = FALSE}
+   some.rows_
+```
+
+## 2.3 Plots
+
+As we can see in the histogram for the categorial variable _year budget range_, higher values are for Not applicable and Don't know. This might mean the Expendure budget to spend (or spent) within the policy initiative.
+
+```{r plots, echo=FALSE}
+#write.csv(data.file.imported_, 'out.csv' )
+
+set.plot <- data.file.imported_ %>% count(`Yearly budget range`)
+set.plot
+
+ggplot(data=set.plot, aes(x = `Yearly budget range`, y= n )) +
+  geom_bar(stat="identity", color="blue", fill="white" ) +
+  geom_text(aes(label=n), vjust=0.5, color="white", size=0.1) +
+  labs(title = "Figure 1. Yearly budget range",
+                      subtitle = "For the 1981 up to the present March 2020",
+                      x = "Yearly Budget",
+                      y = "No of observations")+
+  theme(legend.position="none")
+
+
+
+
+```
+
+Within this point graph, we could see the increase of the interest in the IA policies and initiatives over the years, especially in 2019 where six non-member countries (Argentina, Brazil, Colombia, Costa Rica, Peru and Romania) adopted the Principles.
+```{r plots1, echo=FALSE}
+
+set.plot <- data.file.imported_ %>% count(`Start date`) 
+arrange(set.plot , desc(`Start date`))
+
+ggplot(data=set.plot, aes(x = `Start date`, y= n )) +
+  geom_point(stat="identity", color="blue", fill="white" ) +
+  geom_text(aes(label=n), vjust=0.5, color="white", size=0.1) +
+  labs(title = "Figure 2. Started Year",
+                      subtitle = "For the 1981 up to the present March 2020",
+                      x = "Year",
+                      y = "No of observations")+
+  theme(legend.position="none")
+
+```
+
+This graph shows the concentration of the Policy instrument type category.
+```{r plots2, echo=FALSE}
+
+set.plot <- data.file.imported_ %>% count(`Policy instrument type category`) 
+#arrange(set.plot , desc(`Start date`))
+set.plot
+ggplot(data=set.plot, aes(x = `Policy instrument type category` , y = n )) +
+  geom_bar(stat="identity", color="blue", fill="white" ) +
+  coord_flip() +
+  geom_text(aes(label=n), vjust=0.5, color="white", size=0.1) +
+  labs(title = "Figure 3. Policy type categories",
+                      subtitle = "For the 1981 up to the present March 2020",
+                      x = "Policy type Category",
+                      y = "No of observations")
+
+ 
+```
+
+Here it is shown a high level picture of the countries with more than 20 policy initiatives:
+```{r plots3, echo=FALSE}
+set.plot <- data.file.imported_ %>% count(Country) 
+#arrange(set.plot , desc(`Start date`))
+set.plot %>% filter(n > 19)
+ggplot(data=filter(set.plot , n > 19), aes(x = Country , y = n )) +
+  geom_bar(stat="identity", color="blue", fill="white" ) +
+  coord_flip() +
+  geom_text(aes(label=n), vjust=0.5, color="white", size=0.1) +
+  labs(title = "Figure 4. Policy type Categories per country",
+                      subtitle = "For the 1981 up to the present March 2020",
+                      x = "Country",
+                      y = "No of observations")
+
+  #scatter.smooth (new.set_, x = v9 ,  y = new.set_$v18, main = "v18 ~ v19")
+
+
+```
+
+Here it is shown the proportion of evaluated policy initiatives:
+```{r plots4, echo=FALSE}
+set.plot <- data.file.imported_ %>% count(`Is evaluated ?`) 
+
+ggplot(data=set.plot, aes(x = `Is evaluated ?` , y = n )) +
+  geom_bar(stat="identity", color="blue", fill="white" ) +
+  geom_text(aes(label=n), vjust=0.5, color="white", size=0.1) +
+  labs(title = "Figure 5. Is the Policy evaluated",
+                      subtitle = "For the 1981 up to the present March 2020",
+                      x = "Is evaluated ?",
+                      y = "No of observations")
+
+
+#cor(new.set_$v9, new.set_$v14, new.set_$v15 , new.set_$v16 , new.set_$v18)
+
+
+
+```
+
+# 3 Model and Regression - Approach 1 
+
+## 3.1 Create a model
+
+After analyzing the observations within the dataset, it is a noteworthy inscrease of the policy initatives implementation over the years as shown in Figure 2. and per country as shown in Figure 4. That being said, there have been more stakeholders (Target Groups) mostly government institutions that are interesting in the creation of policies and initiatives, as shown in Figure 3, for a variety of themes areas. 
+
+I consider that The relationship of the adoption of policies and initiatives per country depends on: \
+* the increase of number of target groups that are interested in developing IA policy initiatives, \
+* the addition of differnt themes related to AI \
+
+_I develop the following model based on two variables - Multiple Linear equation_:
+
+$y$: *The relationship of the adoption* of policies and initiatives per country \
+$beta_{0}$: Intercept \
+$x_1$: Themes \
+$x_2$: Target groups \
+
+$y =  \beta_{0} + \beta_{1}x_1 + \beta_{2}x_2$
+
+## 3.2 Running Regression
+
+```{r regressionplots4, echo=FALSE}
+
+lm_ <- lm(v13 ~ v15 + v18, data = new.set_)
+summary(lm_)
+
+```
+
+By replacing the values obtained after running the mdoel, we got the following equation: \ 
+
+$y$: The relationship of the adoption of policies and initiatives per country\
+$beta_{0}$: Intercept => 32.2862 \
+$x_1$: Themes => -1.1378\
+$x_2$: Target groups => 06406\
+
+_$y = 32.2862 - 1.1378x_1 + 0.6406x_2$_
+
+## 3.3 Statistical Analysis
+
+### 3.3.1 Correlation
+
+Here below it is shown the value of the _correlation_ of the applied values within the model: \
+Theorically when the correlation between the variables is weak, it suggests that the response variable is unexplained by the predictors. In other words, it means that there is a minimal relationship between the variables. This might be explained by the fact that v13 (dummy variable) that represents the different countries. 
+_Even strong correlation still does not implyh causation_. Even if this model may show a meaningful nolinear relationship. **_See the scatter figure below_**, it may exist a relation between the growth of the initiative due to the increase of the themes and groups interested in AI policy and initiatives.
+
+```{r regressionsummary, echo=FALSE}
+
+cor_ <- new.set_ %>% select (v13 ,v15, v18)
+#cor_ <- new.set_ %>% select (v19 ,v15, v18)
+cor(cor_)
+scatter.smooth(x=new.set_$v19, y=new.set_$v15+new.set_$v18)
+
+
+```
+
+### 3.3.2 The p-Value
+
+Theorically, it is considered a linear model to be statistically signicant only when both these p-Values are less than the pre-determined statistical signficance level (<0.05). As shown in the Summary _under the Coefficients_ the p-value Pr(>|t|) for v15 = 0.00858  and v18 = 0.00239  and the _at the bottom_ p-value_ is equal to 0.0004709. 
+
+### 3.3.3 R-Squared
+
+Theorically according to the result of the _Multiple R-squared:  0.0232 and Adjusted R-squared:  0.02083 _, it is considered that the variables of model do not have a high degree of linear correlation which might be translated that the model is a  poor model or low goodness of fit.  I consider that this result is basically related to the dataset size; in our case the dataset size is about 630 observations. 
+
+
+# 4 Model and Regression  - Approach 2
+
+## 4.1 Create a model
+
+After running my first model, I observed there is not a tight relationship/correlation between the number of  the policy initatives implementation over the years per country and the stakeholders (Target Groups) the themes.  I decided to create a new data set by _summarizing the Initiatives,  Themes and Target Group by Year_ as shown as follows:\
+
+
+```{r new_dataset}
+m_ <- new.set_ %>% group_by(v4) %>%  summarise_at(vars(v19,v18,v15) , list (No = sum)) 
+m_
+cor(m_)
+write.csv(m_, 'data/dataSet_Model_2.csv' )
+```
+
+So, my new model that the growth of the politicy and initiatives is depeding on: \
+* the increase of _number of target groups_ that are interested in developing IA policy initiatives, \
+* the addition of _different/number of themes in AI_ \
+
+_I develop the following model based on two variables - Multiple Linear equation_:
+
+$y$: *The relationship of the number* of the adoption of policies and initiatives per country \
+$beta_{0}$: Intercept \
+$x_1$: No of Themes \
+$x_2$: No of Target groups \
+
+$y =  \beta_{0} + \beta_{1}x_1 + \beta_{2}x_2$
+
+
+## 4.2 Running Regression
+```{r new.model.regression, echo=FALSE}
+ 
+ lm_1 <- lm(v19_No ~ v15_No + v18_No, data = m_)
+ summary(lm_1)
+
+```
+
+By replacing the values obtained after running the mdoel, we got the following equation: \ 
+
+$y$: The relationship of the number of the adoption of policies and initiatives per country\
+$beta_{0}$: Intercept => -1.80942 \
+$x_1$: Themes => 0.4193\
+$x_2$: Target groups => 0.2294\
+
+_$y = -1.80942 + 0.4193x_1 + 0.2294x_2$_
+
+## 4.3 Statistical Analysis
+### 4.3.1 Correlation
+
+Here below it is shown the value of the correlation of the applied values within the model:
+Theorically when the correlation between the variables is High, it suggests that the response variable is explained by the predictors. In other words, it means that there is a high relationship between the variables. This new model show a meaningful linear relationship. _See the scatter figure below_**. So, it exists a relation between the growth of the initiative due to the increase of the themes and groups interested in AI policy and initiatives.
+
+```{r model2.correlation, echo=FALSE}
+
+cor(m_)
+scatter.smooth(x=m_$v19_No, y=m_$v15_No + m_$v18_No)
+
+```
+
+### 4.3.2 The p-Value
+
+Theorically, it is considered a linear model to be statistically signicant only when both these p-Values are less than the pre-determined statistical signficance level (<0.05). As shown in the Summary under the Coefficients the p-value Pr(>|t|) for v15 = 1.28e-09 and v18 = 9.82e-13 and the at the bottom p-value_ is equal to 2.2e-16. We can imply that this model is _statistically significant or a fitted model_.
+
+### 4.3.3 R-Squared
+
+Theorically according to the result of the Multiple R-squared: 0.997  and Adjusted R-squared: 0.9967 (close to 1 or 100%) , it is considered that the variables of model do have a high degree of linear correlation which might be translated that the model is a good model or high goodness of fit. 
+
+# 5 Conclusion
+
+By doing this assigment I have been glad to be able to have "my hand dirty" with a real situation where I have had to think, try, re-do, review the concepts and  undestand the business context which I found the most important. \
+
+Following, I would provide a short insight of what I did for this assignment. Firstly, I browsed the OECD website to understand the business context. I learned the existance of this institution  : _Organisation for Economic Co-operation and Development_ and the valuable information/data we could obtain from it. \
+
+Secondly, by browsing the OECD website, I noticed I could obtain the datasets related to the 60 countries that belong to the AI Policy Observatory, and get the information about the 300 existing AI policy initiatives.
+
+Third, I decided to do the assigment by using R Studio. I created some functions to get a unique dataset by reading every csv files I have downloaded from OECD Website and then, I ran some statistics to undestand the collected data. 
+
+After collecting the data about the AI policy initiatives, I applied EDA - Exploratory Data Analysis to handle with NA, missing values and some data transformation to create some dummy variables and remove some noise in the dataset.
+
+Regarding the creation of the model, it was what I found very difficult since if the model is not right, applying any algorithm or technique- in this case Regression - is completely useless. After analysing the data, my first move was to find the relationship between the initiatives and the number of target groups and themes. In my opinion, it would be more AI policy initiatives created as long as there are more stakeholders interested in AI and for a variety of Themes. In short, I found a low correlation for the first model *_y = 32.2862 − 1.1378x1 + 0.6406x2_* \
+_y : The relationship of the **adoption of policies** and initiatives per country where x1 represents the Themes and and x2 the Target groups_\
+
+The different results for the Adjusted R-squared, p-value, Pr(>|t|) and Correlation states the weakness of the model and the poor relation between the variables.\
+
+Then, I uploaded the dataset in RapidMiner trying to get a different overview or insight of the problem. RapidMini showed the that Target Group and Themes are variable that had a hight importance within the dataet. So, I could figure out a new model by changing the dataset. I grouped the number of the type of policy per year and calculating the sum of the number of the Themes and Target Groups. I got the following new model: *_y = −1.80942 + 0.4193x1 + 0.2294x2_* \ 
+_y : The relationship of the **number of the adoption** of policies and initiatives per country where x1 represents the Themes and and x2 the Target groups_\
+
+The different results for the Adjusted R-squared, p-value, Pr(>|t|) and Correlation states the strengh of the model and the high relation between the variables.\
+
+Finally, due to the small size of the dataset, it does not makes any sense to apply Regression for prediction within the context of Machine Learning. 
+
+
